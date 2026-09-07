@@ -1,0 +1,77 @@
+# Backend Continuous Integration
+#
+# Mirrors frontend-ci.yaml but for the Flask API: flake8 and pytest run in
+# parallel, and the Docker image only gets built once both have gone green.
+
+name: Backend Continuous Integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "starter/backend/**"
+      - ".github/workflows/backend-ci.yaml"
+      - ".github/actions/backend-deps/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write # needed for the comment-status job below
+
+jobs:
+  lint:
+    name: Lint (flake8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/backend-deps
+
+      - name: flake8
+        working-directory: starter/backend
+        run: pipenv run lint
+
+  test:
+    name: Test (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/backend-deps
+
+      - name: pytest
+        working-directory: starter/backend
+        run: pipenv run test
+
+  build:
+    name: Build backend image
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/backend-deps
+
+      - name: Build the Docker image (build-only, nothing pushed here)
+        working-directory: starter/backend
+        run: docker build --tag mp-backend:${{ github.sha }} .
+
+  comment-status:
+    name: Comment PR with result
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const jobs = ['lint', 'test', 'build'];
+            const results = ${{ toJSON(needs) }};
+            const lines = jobs.map(j => `- ${j}: ${results[j].result === 'success' ? '✅' : '❌'}`);
+            const overall = jobs.every(j => results[j].result === 'success') ? '✅ Backend CI passed' : '❌ Backend CI failed';
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${overall}\n\n${lines.join('\n')}`
+            });

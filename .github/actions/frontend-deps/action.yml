@@ -1,0 +1,28 @@
+name: "Frontend deps"
+description: >
+  Sets up the Node version pinned in .nvmrc, restores the npm cache, and
+  installs the frontend's node_modules. Pulled out into one action because
+  the lint, test and build jobs in both frontend-ci.yaml and frontend-cd.yaml
+  all need the exact same three steps - keeping it in one place means a
+  Node/cache tweak only has to happen once.
+
+runs:
+  using: "composite"
+  steps:
+    - name: Use the Node version from .nvmrc
+      uses: actions/setup-node@v4
+      with:
+        node-version-file: starter/frontend/.nvmrc
+
+    - name: Restore npm cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-frontend-npm-${{ hashFiles('starter/frontend/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-frontend-npm-
+
+    - name: npm ci
+      shell: bash
+      working-directory: starter/frontend
+      run: npm ci

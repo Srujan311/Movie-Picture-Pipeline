@@ -1,0 +1,92 @@
+# Frontend Continuous Integration
+#
+# Gatekeeper for anything touching starter/frontend before it can merge into
+# main: eslint has to be clean and the Jest suite has to pass before we even
+# bother building the Docker image. Lint and test don't depend on each other
+# so they run side by side; the build job waits on both via `needs`.
+
+name: Frontend Continuous Integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "starter/frontend/**"
+      - ".github/workflows/frontend-ci.yaml"
+      - ".github/actions/frontend-deps/**"
+  # so we can re-run it on demand without pushing an empty commit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write # needed for the comment-status job below
+
+jobs:
+  lint:
+    name: Lint (eslint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/frontend-deps
+
+      - name: eslint
+        working-directory: starter/frontend
+        run: npm run lint
+
+  test:
+    name: Test (Jest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/frontend-deps
+
+      - name: Jest, non-interactive
+        working-directory: starter/frontend
+        env:
+          CI: true
+        run: npm run test -- --watchAll=false
+
+  build:
+    name: Build frontend image
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/frontend-deps
+
+      - name: Build the Docker image (no push - this is just a CI sanity check)
+        working-directory: starter/frontend
+        env:
+          # local backend URL, fine for a build-only check - the real URL
+          # is supplied in frontend-cd.yaml when we actually deploy
+          REACT_APP_MOVIE_API_URL: http://localhost:5000
+        run: |
+          docker build \
+            --build-arg=REACT_APP_MOVIE_API_URL=${REACT_APP_MOVIE_API_URL} \
+            --tag mp-frontend:${{ github.sha }} \
+            .
+
+  # Small extra so a reviewer doesn't have to click into Actions to see the
+  # result - drops a status comment straight on the PR.
+  comment-status:
+    name: Comment PR with result
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const jobs = ['lint', 'test', 'build'];
+            const results = ${{ toJSON(needs) }};
+            const lines = jobs.map(j => `- ${j}: ${results[j].result === 'success' ? '✅' : '❌'}`);
+            const overall = jobs.every(j => results[j].result === 'success') ? '✅ Frontend CI passed' : '❌ Frontend CI failed';
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${overall}\n\n${lines.join('\n')}`
+            });
