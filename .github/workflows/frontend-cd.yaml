@@ -23,7 +23,7 @@ env:
   EKS_CLUSTER_NAME: cluster
   # backend URL baked into the React build - override with a repo variable
   # of the same name once the backend's real LoadBalancer URL is known
-  REACT_APP_MOVIE_API_URL: ${{ vars.REACT_APP_MOVIE_API_URL || 'http://localhost:5000' }}
+  REACT_APP_MOVIE_API_URL: ${{ vars.REACT_APP_MOVIE_API_URL }}
 
 jobs:
   lint:
@@ -70,6 +70,8 @@ jobs:
       - name: Log in to ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+      - name: Verify frontend API URL
+        run: echo "REACT_APP_MOVIE_API_URL=$REACT_APP_MOVIE_API_URL"
 
       - name: Build and push, tagged with the commit SHA
         id: build-image
